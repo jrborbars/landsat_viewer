@@ -1,0 +1,148 @@
+services:
+  # FastAPI Backend Application
+  fastapi:
+    build:
+      context: .
+      dockerfile: Dockerfile.fastapi
+    container_name: landsat_fastapi_prod
+    env_file:
+      - prod.env
+    volumes:
+      - ./logs:/app/logs:ro
+    depends_on:
+      - redis
+      - supabase
+    networks:
+      - landsat_network
+    restart: always
+    deploy:
+      replicas: 2
+      resources:
+        limits:
+          memory: 2G
+        reservations:
+          memory: 1G
+
+  # Celery Worker for Background Jobs
+  celery-worker:
+    build:
+      context: .
+      dockerfile: Dockerfile.celery
+    container_name: landsat_celery_worker_prod
+    env_file:
+      - prod.env
+    volumes:
+      - ./logs:/app/logs:ro
+      - ./temp:/app/temp
+    depends_on:
+      - redis
+      - supabase
+    networks:
+      - landsat_network
+    restart: always
+    deploy:
+      replicas: 3
+    command: celery -A app.core.celery_app worker --loglevel=info --concurrency=4
+
+  # Celery Beat for Scheduled Tasks
+  celery-beat:
+    build:
+      context: .
+      dockerfile: Dockerfile.celery
+    container_name: landsat_celery_beat_prod
+    env_file:
+      - prod.env
+    volumes:
+      - ./logs:/app/logs:ro
+    depends_on:
+      - redis
+    networks:
+      - landsat_network
+    restart: always
+    command: celery -A app.core.celery_app beat --loglevel=info --schedule=/app/celerybeat-schedule
+
+  # Redis Message Broker and Cache
+  redis:
+    image: redis:7-alpine
+    container_name: landsat_redis_prod
+    volumes:
+      - redis_data:/data
+    networks:
+      - landsat_network
+    restart: always
+    command: redis-server --appendonly yes --requirepass ${REDIS_PASSWORD:-your-redis-password}
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+        reservations:
+          memory: 256M
+
+  # Nginx Reverse Proxy and Load Balancer
+  nginx:
+    image: nginx:alpine
+    container_name: landsat_nginx_prod
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./nginx/ssl:/etc/nginx/ssl:ro
+      - ./logs/nginx:/var/log/nginx
+    depends_on:
+      - fastapi
+    networks:
+      - landsat_network
+    restart: always
+    deploy:
+      resources:
+        limits:
+          memory: 256M
+        reservations:
+          memory: 128M
+
+  # PostgreSQL Database (Supabase)
+  supabase:
+    image: supabase/postgres:15.1.0.68
+    container_name: landsat_supabase_prod
+    environment:
+      POSTGRES_PASSWORD: ${SUPABASE_DB_PASSWORD:-your-db-password}
+      POSTGRES_DB: landsat_db
+    volumes:
+      - supabase_data:/var/lib/postgresql/data
+    networks:
+      - landsat_network
+    restart: always
+    deploy:
+      resources:
+        limits:
+          memory: 1G
+        reservations:
+          memory: 512M
+
+  # PgAdmin for Database Management (Optional)
+  pgadmin:
+    image: dpage/pgadmin4:7
+    container_name: landsat_pgadmin_prod
+    environment:
+      PGADMIN_DEFAULT_EMAIL: admin@landsatviewer.com
+      PGADMIN_DEFAULT_PASSWORD: ${PGADMIN_PASSWORD:-admin}
+    volumes:
+      - pgadmin_data:/var/lib/pgadmin
+    networks:
+      - landsat_network
+    restart: always
+    profiles:
+      - admin
+
+volumes:
+  redis_data:
+    driver: local
+  supabase_data:
+    driver: local
+  pgadmin_data:
+    driver: local
+
+networks:
+  landsat_network:
+    driver: bridge

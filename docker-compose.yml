@@ -1,0 +1,85 @@
+services:
+  # FastAPI Backend Application
+  fastapi:
+    build:
+      context: .
+      dockerfile: Dockerfile.fastapi
+    container_name: landsat_fastapi
+    env_file:
+      - dev.env
+    volumes:
+      - db_data:/app/data
+      - .:/app
+    depends_on:
+      - redis
+    networks:
+      - landsat_network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+
+
+  # Redis Message Broker and Cache
+  redis:
+    image: redis:7-alpine
+    container_name: landsat_redis
+    volumes:
+      - redis_data:/data
+    networks:
+      - landsat_network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 3
+
+  # Nginx Reverse Proxy and Load Balancer
+  nginx:
+    build:
+      context: .
+      dockerfile: Dockerfile.nginx
+    container_name: landsat_nginx
+    ports:
+      - "80:80"
+      - "443:443"
+    depends_on:
+      - fastapi
+      - frontend
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+    networks:
+      - landsat_network
+    restart: unless-stopped
+
+  # Frontend React Application (Development)
+  frontend:
+    build:
+      context: .
+      dockerfile: Dockerfile.frontend
+    container_name: landsat_frontend
+    volumes:
+      - ./frontend:/app
+      - /app/node_modules
+    environment:
+      - WDS_SOCKET_PORT=0
+      - WATCHPACK_POLLING=true
+    networks:
+      - landsat_network
+    restart: unless-stopped
+
+
+
+volumes:
+  redis_data:
+    driver: local
+  db_data:
+    driver: local
+
+networks:
+  landsat_network:
+    driver: bridge

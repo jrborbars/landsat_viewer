@@ -135,7 +135,7 @@ celerybeat.pid
 *.sage.py
 
 # Environments
-.env
+.env  # Local environment file (copy of dev.env or prod.env)
 .envrc
 .venv
 env/
